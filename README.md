@@ -1,1 +1,1 @@
-# KAZE-KOMIK
+# KAZE-KOMIK-2
