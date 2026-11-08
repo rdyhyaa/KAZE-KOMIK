@@ -76,7 +76,7 @@ async function muatData() {
     const grid = document.getElementById("grid-container");
     try {
         // Ambil data komik populer dari Komiku
-        const data = await getAPI(`/komiku/komik-populer`);
+        const data = await getAPI(`/komiku/terbaru`);
         
         grid.innerHTML = "";
         if (!data || !data.data || data.data.length === 0) {
