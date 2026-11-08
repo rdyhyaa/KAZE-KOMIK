@@ -6,10 +6,25 @@
 <title>Kaze Komik</title>
 <style>
   body { font-family: sans-serif; background: #f4f4f4; margin: 0; padding: 15px; }
-  h2 { text-align: center; color: #d32f2f; margin-bottom: 20px; }
-  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+  h2 { text-align: center; color: #d32f2f; margin-bottom: 15px; }
+  
+  /* Perbaikan tampilan kotak pencarian */
+  .search-box { 
+    width: 100%; 
+    padding: 12px 15px; 
+    border: 1px solid #ddd; 
+    border-radius: 25px; 
+    margin-bottom: 20px; 
+    box-sizing: border-box; 
+    font-size: 14px; 
+    outline: none;
+    -webkit-appearance: none; /* Biar ga di-zoom otomatis di HP */
+  }
+  .search-box:focus { border-color: #d32f2f; }
+
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
   .card { background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.1); cursor: pointer; }
-  .card img { width: 100%; height: 170px; object-fit: cover; background: #ddd; }
+  .card img { width: 100%; height: 160px; object-fit: cover; background: #ddd; }
   .card p { font-size: 12px; margin: 8px; text-align: center; font-weight: bold; line-height: 1.2; }
   .loading { text-align: center; color: #888; width: 100%; grid-column: 1/-1; padding: 20px; }
   
@@ -28,6 +43,9 @@
 
 <div id="home">
   <h2>🥷 Kaze Komik</h2>
+  <!-- Input Pencarian -->
+  <input type="text" id="search" class="search-box" placeholder="🔍 Cari judul komik..." oninput="cariKomik()">
+  
   <div id="grid">
     <div class="loading">Memuat data komik...</div>
   </div>
@@ -54,8 +72,6 @@ async function getAPI(path) {
     const url = PROXY + "/?url=" + encodeURIComponent(API + path);
     const res = await fetch(url);
     const json = await res.json();
-    
-    // Kalo MangaDex ngebalikin error (misal limit), kita lempar error-nya
     if (json.result === 'error' || json.errors) {
        throw new Error(json.errors ? json.errors[0].detail : "Error dari API");
     }
@@ -69,36 +85,63 @@ function getImg(url) {
   return PROXY + "/?url=" + encodeURIComponent(url);
 }
 
-async function loadKomik() {
-  try {
-    // Pake endpoint populer tanpa filter bahasa yang terlalu ketat
-    const data = await getAPI("/manga?limit=20&order[followedCount]=desc&includes[]=cover_art");
-    const grid = document.getElementById("grid");
-    grid.innerHTML = "";
-    
-    if (!data.data || data.data.length === 0) {
-       grid.innerHTML = "<p style='color:#d32f2f;'>Data kosong dari MangaDex. Coba refresh.</p>";
-       return;
+// Fungsi ngambil judul (Prioritas Bahasa Inggris)
+function getTitle(m) {
+  if (!m.attributes.title) return "Tanpa Judul";
+  return m.attributes.title.en || m.attributes.title['ja-ro'] || Object.values(m.attributes.title)[0];
+}
+
+function renderKomik(dataList) {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+
+  if (!dataList || dataList.length === 0) {
+    grid.innerHTML = "<p style='color:#d32f2f; text-align:center; width:100%;'>Komik tidak ditemukan 😅</p>";
+    return;
+  }
+
+  dataList.forEach(m => {
+    const judul = getTitle(m);
+    let cover = "https://via.placeholder.com/150x200?text=No+Cover";
+    const coverRel = m.relationships.find(r => r.type === "cover_art");
+    if (coverRel && coverRel.attributes && coverRel.attributes.fileName) {
+      cover = getImg(`https://uploads.mangadex.org/covers/${m.id}/${coverRel.attributes.fileName}.256.jpg`);
     }
 
-    data.data.forEach(m => {
-      const judul = (m.attributes.title && (m.attributes.title.en || Object.values(m.attributes.title)[0])) || "Tanpa Judul";
-      
-      let cover = "https://via.placeholder.com/150x200?text=No+Cover";
-      const coverRel = m.relationships.find(r => r.type === "cover_art");
-      if (coverRel && coverRel.attributes && coverRel.attributes.fileName) {
-        cover = getImg(`https://uploads.mangadex.org/covers/${m.id}/${coverRel.attributes.fileName}.256.jpg`);
-      }
+    const card = document.createElement("div");
+    card.className = "card";
+    card.onclick = () => bukaDetail(m.id);
+    card.innerHTML = `<img src="${cover}" loading="lazy"><p>${judul}</p>`;
+    grid.appendChild(card);
+  });
+}
 
-      const card = document.createElement("div");
-      card.className = "card";
-      card.onclick = () => bukaDetail(m.id);
-      card.innerHTML = `<img src="${cover}" loading="lazy"><p>${judul}</p>`;
-      grid.appendChild(card);
-    });
+async function loadKomik() {
+  try {
+    document.getElementById("grid").innerHTML = "<div class='loading'>Memuat data komik...</div>";
+    const data = await getAPI("/manga?limit=50&order[followedCount]=desc&includes[]=cover_art");
+    renderKomik(data.data);
   } catch (err) {
     document.getElementById("grid").innerHTML = `<div class="loading" style="color:red;">Gagal: ${err.message}</div>`;
   }
+}
+
+// Fitur Pencarian
+let searchTimer;
+function cariKomik() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const query = document.getElementById("search").value.trim();
+    if (!query) { loadKomik(); return; }
+    
+    try {
+      document.getElementById("grid").innerHTML = "<div class='loading'>Mencari komik...</div>";
+      const data = await getAPI(`/manga?limit=50&title=${encodeURIComponent(query)}&includes[]=cover_art`);
+      renderKomik(data.data);
+    } catch (err) {
+      document.getElementById("grid").innerHTML = `<div class="loading" style="color:red;">Gagal mencari: ${err.message}</div>`;
+    }
+  }, 800); 
 }
 
 async function bukaDetail(id) {
@@ -110,11 +153,11 @@ async function bukaDetail(id) {
   try {
     const data = await getAPI(`/manga/${id}?includes[]=cover_art`);
     const m = data.data;
-    const judul = (m.attributes.title && (m.attributes.title.en || Object.values(m.attributes.title)[0])) || "Tanpa Judul";
+    const judul = getTitle(m);
     
     let deskripsi = "Tidak ada deskripsi.";
     if (m.attributes.description) {
-        deskripsi = m.attributes.description.id || m.attributes.description.en || Object.values(m.attributes.description)[0] || deskripsi;
+        deskripsi = m.attributes.description.en || m.attributes.description.id || Object.values(m.attributes.description)[0] || deskripsi;
     }
 
     let cover = "";
@@ -134,6 +177,7 @@ async function bukaDetail(id) {
       </div>
     `;
 
+    // Filter chapter bahasa Indonesia
     const feed = await getAPI(`/manga/${id}/feed?limit=100&translated-language[]=id&order[chapter]=desc`);
     const list = document.getElementById("chapter-list");
     list.innerHTML = "";
