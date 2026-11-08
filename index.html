@@ -46,15 +46,23 @@
 </div>
 
 <script>
-// URL CLOUDFLARE LO UDAH GW MASUKIN DI SINI
 const PROXY = "https://jembatan1.raditgaring1.workers.dev"; 
-
 const API = "https://api.mangadex.org";
 
 async function getAPI(path) {
-  const url = PROXY + "/?url=" + encodeURIComponent(API + path);
-  const res = await fetch(url);
-  return res.json();
+  try {
+    const url = PROXY + "/?url=" + encodeURIComponent(API + path);
+    const res = await fetch(url);
+    const json = await res.json();
+    
+    // Kalo MangaDex ngebalikin error (misal limit), kita lempar error-nya
+    if (json.result === 'error' || json.errors) {
+       throw new Error(json.errors ? json.errors[0].detail : "Error dari API");
+    }
+    return json;
+  } catch (e) {
+    throw e;
+  }
 }
 
 function getImg(url) {
@@ -63,15 +71,22 @@ function getImg(url) {
 
 async function loadKomik() {
   try {
-    const data = await getAPI("/manga?limit=20&order[followedCount]=desc&includes[]=cover_art&translated-language[]=id");
+    // Pake endpoint populer tanpa filter bahasa yang terlalu ketat
+    const data = await getAPI("/manga?limit=20&order[followedCount]=desc&includes[]=cover_art");
     const grid = document.getElementById("grid");
     grid.innerHTML = "";
     
+    if (!data.data || data.data.length === 0) {
+       grid.innerHTML = "<p style='color:#d32f2f;'>Data kosong dari MangaDex. Coba refresh.</p>";
+       return;
+    }
+
     data.data.forEach(m => {
-      const judul = m.attributes.title.en || Object.values(m.attributes.title)[0] || "Tanpa Judul";
-      const coverRel = m.relationships.find(r => r.type === "cover_art");
+      const judul = (m.attributes.title && (m.attributes.title.en || Object.values(m.attributes.title)[0])) || "Tanpa Judul";
+      
       let cover = "https://via.placeholder.com/150x200?text=No+Cover";
-      if (coverRel && coverRel.attributes) {
+      const coverRel = m.relationships.find(r => r.type === "cover_art");
+      if (coverRel && coverRel.attributes && coverRel.attributes.fileName) {
         cover = getImg(`https://uploads.mangadex.org/covers/${m.id}/${coverRel.attributes.fileName}.256.jpg`);
       }
 
@@ -82,7 +97,7 @@ async function loadKomik() {
       grid.appendChild(card);
     });
   } catch (err) {
-    document.getElementById("grid").innerHTML = `<div class="loading" style="color:red;">Gagal memuat. Pastikan URL PROXY bener!<br>${err.message}</div>`;
+    document.getElementById("grid").innerHTML = `<div class="loading" style="color:red;">Gagal: ${err.message}</div>`;
   }
 }
 
@@ -95,17 +110,25 @@ async function bukaDetail(id) {
   try {
     const data = await getAPI(`/manga/${id}?includes[]=cover_art`);
     const m = data.data;
-    const judul = m.attributes.title.en || Object.values(m.attributes.title)[0];
-    const deskripsi = (m.attributes.description && (m.attributes.description.id || m.attributes.description.en)) || "Tidak ada deskripsi.";
+    const judul = (m.attributes.title && (m.attributes.title.en || Object.values(m.attributes.title)[0])) || "Tanpa Judul";
+    
+    let deskripsi = "Tidak ada deskripsi.";
+    if (m.attributes.description) {
+        deskripsi = m.attributes.description.id || m.attributes.description.en || Object.values(m.attributes.description)[0] || deskripsi;
+    }
+
+    let cover = "";
     const coverRel = m.relationships.find(r => r.type === "cover_art");
-    const cover = coverRel ? getImg(`https://uploads.mangadex.org/covers/${m.id}/${coverRel.attributes.fileName}.256.jpg`) : "";
+    if (coverRel && coverRel.attributes) {
+        cover = getImg(`https://uploads.mangadex.org/covers/${m.id}/${coverRel.attributes.fileName}.256.jpg`);
+    }
 
     document.getElementById("detail-info").innerHTML = `
       <div class="info">
         <img src="${cover}">
         <div>
           <h3>${judul}</h3>
-          <p>Status: ${m.attributes.status}</p>
+          <p>Status: ${m.attributes.status || "-"}</p>
           <p style="margin-top:5px;">${deskripsi.substring(0, 100)}...</p>
         </div>
       </div>
@@ -115,7 +138,7 @@ async function bukaDetail(id) {
     const list = document.getElementById("chapter-list");
     list.innerHTML = "";
 
-    if (feed.data.length === 0) {
+    if (!feed.data || feed.data.length === 0) {
       list.innerHTML = "<p style='color:#888;'>Belum ada chapter bahasa Indonesia.</p>";
       return;
     }
@@ -147,6 +170,11 @@ async function bacaChapter(chapterId) {
 
     const container = document.getElementById("reader-img");
     container.innerHTML = "";
+
+    if (!pages || pages.length === 0) {
+        container.innerHTML = "<p style='color:red;'>Gambar tidak tersedia.</p>";
+        return;
+    }
 
     pages.forEach(file => {
       const imgUrl = getImg(`${baseUrl}/data/${hash}/${file}`);
